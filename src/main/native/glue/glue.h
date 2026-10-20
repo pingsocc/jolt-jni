@@ -214,16 +214,25 @@ extern std::atomic<JPH::uint32> gDeleteCount;
     return result; \
   }
 
+// A callback from native code: on a thread Java already knows (the one that
+// called into Jolt, PhysicsSystem::Update's caller), its own environment, and
+// it's left attached; on one of Jolt's own threads, attached for the call and
+// detached again after. (Detaching a Java thread that's in the middle of a
+// native call isn't allowed: HotSpot refuses it, but GraalVM's native images
+// detach it, and it crashes on returning to Java.)
 #ifdef ANDROID
-
 // Note: On ART, the first argument to AttachCurrentThread() is JNIEnv **,
 // which doesn't comply with the Invocation API specification.
+#define JOLTJNI_ATTACH(pVM, ppAttachEnv) (pVM)->AttachCurrentThread(ppAttachEnv, NULL)
+#else
+#define JOLTJNI_ATTACH(pVM, ppAttachEnv) (pVM)->AttachCurrentThread((void **)(ppAttachEnv), NULL)
+#endif
 
 #define ATTACH_CURRENT_THREAD(pVM, ppAttachEnv, attachedHere) \
     bool attachedHere = false; \
     jint retCode = (pVM)->GetEnv((void **)(ppAttachEnv), JNI_VERSION_1_6); \
     if (JNI_EDETACHED == retCode) { \
-        retCode = (pVM)->AttachCurrentThread(ppAttachEnv, NULL); \
+        retCode = JOLTJNI_ATTACH(pVM, ppAttachEnv); \
         attachedHere = true; \
     } \
     JPH_ASSERT(JNI_OK == retCode);
@@ -231,15 +240,5 @@ extern std::atomic<JPH::uint32> gDeleteCount;
     if (attachedHere) { \
         (pVM)->DetachCurrentThread(); \
     }
-
-#else
-
-#define ATTACH_CURRENT_THREAD(pVM, ppAttachEnv, attachedHere) \
-    jint retCode = (pVM)->AttachCurrentThread((void **)(ppAttachEnv), NULL); \
-    JPH_ASSERT(JNI_OK == retCode);
-#define DETACH_CURRENT_THREAD(pVM, ppAttachEnv, attachedHere) \
-    (pVM)->DetachCurrentThread();
-
-#endif
 
 #endif
